@@ -58,3 +58,68 @@ func MetricFromPath(root, full string) string {
 	rel = strings.TrimPrefix(rel, string(filepath.Separator))
 	return strings.ReplaceAll(rel, string(filepath.Separator), ".")
 }
+
+// ResizeOptions contains options for resizing a whisper file
+type ResizeOptions struct {
+	XFF         float32
+	Compressed  bool
+	Aggregation string
+}
+
+// ResizeWhisperFile resizes a whisper file to match the given retentions
+// Returns old and new retention strings, and an error if something went wrong
+func ResizeWhisperFile(path string, retentions []ArchiveSpec, opts ResizeOptions) (oldRetentions, newRetentions string, resized bool, err error) {
+	wsp, err := whisper.Open(path)
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to open: %w", err)
+	}
+
+	oldRetentions = FormatRetentionList(WhisperRetentionsToSpecs(wsp.Retentions()))
+
+	if CompareSpecsEqual(WhisperRetentionsToSpecs(wsp.Retentions()), retentions) {
+		_ = wsp.Close()
+		return oldRetentions, oldRetentions, false, nil
+	}
+
+	newRetentions = FormatRetentionList(retentions)
+
+	whisperRetentions := make(whisper.Retentions, len(retentions))
+	for i, r := range retentions {
+		points := r.RetentionSecs / r.SecondsPerPoint
+		ret := whisper.NewRetention(r.SecondsPerPoint, points)
+		whisperRetentions[i] = &ret
+	}
+
+	var aggrMethod whisper.AggregationMethod
+	switch strings.ToLower(opts.Aggregation) {
+	case "sum":
+		aggrMethod = whisper.Sum
+	case "last":
+		aggrMethod = whisper.Last
+	case "max":
+		aggrMethod = whisper.Max
+	case "min":
+		aggrMethod = whisper.Min
+	case "first":
+		aggrMethod = whisper.First
+	default:
+		aggrMethod = whisper.Average
+	}
+
+	xff := opts.XFF
+	if xff == 0 {
+		xff = 0.5
+	}
+
+	options := &whisper.Options{
+		Compressed: opts.Compressed,
+		FLock:      true,
+	}
+
+	err = wsp.UpdateConfig(whisperRetentions, aggrMethod, xff, options)
+	if err != nil {
+		return oldRetentions, newRetentions, false, fmt.Errorf("failed to resize: %w", err)
+	}
+
+	return oldRetentions, newRetentions, true, nil
+}
