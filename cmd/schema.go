@@ -17,6 +17,7 @@ var (
 	xff         float32
 	compressed  bool
 	aggregation string
+	rootDir     string
 	schemaCmd   = &cobra.Command{
 		Use:   "schema",
 		Short: "command to run analysis in comparison to a storage-schemas.conf",
@@ -37,12 +38,32 @@ var (
 				log.Fatalf("no default schema found in storage-schemas.conf\n")
 			}
 
-			files, err := lib.FindWhisperFiles(args[0])
-			if err != nil {
-				log.Fatalf("failed walking root %s: %v\n", args[0], err)
+			pathArg := args[0]
+			rootForMetric := rootDir
+			if rootForMetric == "" {
+				rootForMetric = pathArg
 			}
+
+			if rootDir != "" {
+				if !lib.IsDirectory(rootDir) {
+					log.Fatalf("root-dir %s does not exist or is not a directory\n", rootDir)
+				}
+			}
+
+			var files []string
+			if lib.IsDirectory(pathArg) {
+				files, err = lib.FindWhisperFiles(pathArg)
+				if err != nil {
+					log.Fatalf("failed walking root %s: %v\n", pathArg, err)
+				}
+			} else if lib.IsWhisperFile(pathArg) {
+				files = []string{pathArg}
+			} else {
+				log.Fatalf("%s is not a directory or .wsp file\n", pathArg)
+			}
+
 			if len(files) == 0 {
-				log.Fatalf("no .wsp files found under %s\n", args[0])
+				log.Fatalf("no .wsp files found\n")
 			}
 
 			wr := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
@@ -50,7 +71,7 @@ var (
 
 			hasErrors := false
 			for _, f := range files {
-				metric := lib.MetricFromPath(args[0], f)
+				metric := lib.MetricFromPath(rootForMetric, f)
 
 				matched := findMatchingSchema(metric, schemas)
 				if matched == nil {
@@ -89,35 +110,49 @@ var (
 		Args:  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		Short: "check if whisper files are matching the defined retentions",
 		Run: func(cmd *cobra.Command, args []string) {
-			path, _ := cmd.Flags().GetString("schema")
-			//parse storage-schemas
-			schemas, err := lib.ParseStorageSchemas(path)
+			schemaPath, _ := cmd.Flags().GetString("schema")
+			schemas, err := lib.ParseStorageSchemas(schemaPath)
 			if err != nil {
-				log.Fatalf("failed to parse schemas %s: %v\n", path, err)
+				log.Fatalf("failed to parse schemas %s: %v\n", schemaPath, err)
 			}
 
-			// find all .wsp files under path
+			pathArg := args[0]
+			rootForMetric := rootDir
+			if rootForMetric == "" {
+				rootForMetric = pathArg
+			}
+
+			if rootDir != "" {
+				if !lib.IsDirectory(rootDir) {
+					log.Fatalf("root-dir %s does not exist or is not a directory\n", rootDir)
+				}
+			}
+
 			var files []string
-			files, err = lib.FindWhisperFiles(args[0])
-			if err != nil {
-				log.Fatalf("failed walking root %s: %v\n", args[0], err)
-			}
-			if len(files) == 0 {
-				log.Fatalf("no .wsp files found under %s\n", args[0])
+			if lib.IsDirectory(pathArg) {
+				files, err = lib.FindWhisperFiles(pathArg)
+				if err != nil {
+					log.Fatalf("failed walking root %s: %v\n", pathArg, err)
+				}
+			} else if lib.IsWhisperFile(pathArg) {
+				files = []string{pathArg}
+			} else {
+				log.Fatalf("%s is not a directory or .wsp file\n", pathArg)
 			}
 
-			// output table header
+			if len(files) == 0 {
+				log.Fatalf("no .wsp files found\n")
+			}
+
 			wr := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 			_, _ = fmt.Fprintln(wr, "status\tmetric\texpected\tactual\tdetail")
 
 			for _, f := range files {
-				metric := lib.MetricFromPath(args[0], f)
+				metric := lib.MetricFromPath(rootForMetric, f)
 
-				// find first matching schema (top-to-bottom)
 				var matched *lib.Schema
 				for i := range schemas {
 					s := &schemas[i]
-					// If pattern is empty treat as no-match (Graphite typically has pattern)
 					if s.Pattern == nil {
 						continue
 					}
@@ -128,12 +163,10 @@ var (
 				}
 
 				if matched == nil {
-					// no schema matched
 					_, _ = fmt.Fprintf(wr, "NOMATCH\t%s\t-\t-\tno schema matched\n", metric)
 					continue
 				}
 
-				// open whisper file and read retentions
 				var wf *whisper.Whisper
 				wf, err = whisper.Open(f)
 				if err != nil {
@@ -143,7 +176,7 @@ var (
 				actualSpecs := lib.WhisperRetentionsToSpecs(wf.Retentions())
 				err = wf.Close()
 				if err != nil {
-					_, _ = fmt.Fprintf(wr, "ERROR\t%s\t-\t-\tfailed to close: %v\n", path, err)
+					_, _ = fmt.Fprintf(wr, "ERROR\t%s\t-\t-\tfailed to close: %v\n", pathArg, err)
 					return
 				}
 
@@ -202,6 +235,7 @@ var (
 func init() {
 	schemaCmd.PersistentFlags().StringVarP(&schema, "schema", "s", "", "path to storage-schemas.conf")
 	_ = schemaCmd.MarkPersistentFlagRequired("schema")
+	schemaCmd.PersistentFlags().StringVar(&rootDir, "root-dir", "", "root directory for metric name calculation")
 
 	applyCmd.Flags().Float32VarP(&xff, "xff", "x", 0.5, "xFilesFactor")
 	applyCmd.Flags().BoolVar(&compressed, "compressed", false, "use compressed format (default: keep current)")

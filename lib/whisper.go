@@ -59,6 +59,18 @@ func MetricFromPath(root, full string) string {
 	return strings.ReplaceAll(rel, string(filepath.Separator), ".")
 }
 
+func IsWhisperFile(path string) bool {
+	return strings.HasSuffix(strings.ToLower(path), ".wsp")
+}
+
+func IsDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
 // ResizeOptions contains options for resizing a whisper file
 type ResizeOptions struct {
 	XFF         float32
