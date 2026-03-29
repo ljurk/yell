@@ -23,6 +23,23 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract Go version
+        id: version
+        run: echo GO_VERSION=$(awk '$1 == "go" {print $2}' go.mod) >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.version.outputs.GO_VERSION }}
+
+      - name: Test
+        run: go test -v ./...
+
   golangci:
     name: lint
     runs-on: ubuntu-latest
